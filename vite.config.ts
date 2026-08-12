@@ -1,8 +1,34 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import { buildTokens } from "./scripts/build-tokens.mjs";
+
+/**
+ * Regenerates src/index.css and src/generated/tokens.tsx from tokens.json on startup and
+ * whenever tokens.json changes, so editing the single source of truth
+ * hot-reloads the running app.
+ */
+function designTokensPlugin(): Plugin {
+  const tokensFile = path.resolve(import.meta.dirname, "tokens.json");
+  return {
+    name: "design-tokens",
+    buildStart() {
+      buildTokens();
+      this.addWatchFile(tokensFile);
+    },
+    configureServer(server) {
+      server.watcher.add(tokensFile);
+      server.watcher.on("change", (file) => {
+        if (path.resolve(file) === tokensFile) {
+          buildTokens();
+          server.ws.send({ type: "full-reload" });
+        }
+      });
+    },
+  };
+}
 
 const rawPort = process.env.PORT;
 
@@ -29,6 +55,7 @@ if (!basePath) {
 export default defineConfig({
   base: basePath,
   plugins: [
+    designTokensPlugin(),
     react(),
     tailwindcss(),
     runtimeErrorOverlay(),
@@ -40,31 +67,21 @@ export default defineConfig({
               root: path.resolve(import.meta.dirname, ".."),
             }),
           ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
         ]
       : []),
   ],
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "src"),
-      "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
-    },
-    dedupe: ["react", "react-dom"],
-  },
   root: path.resolve(import.meta.dirname),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
   },
   server: {
     port,
+    strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
     fs: {
       strict: true,
-      deny: ["**/.*"],
     },
   },
   preview: {
